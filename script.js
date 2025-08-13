@@ -1,5 +1,9 @@
 // script.js
 
+// --- НАСТРОЙКА ---
+// Укажите здесь URL вашего задеплоенного бэкенда Vercel
+const BACKEND_URL = 'https://elara-mystery-xfzqijy4s-jimmyjonezzs-projects.vercel.app/'; // <<<===== ЗАМЕНИТЕ НА ВАШ URL
+
 const chatHistory = document.getElementById('chat-history');
 const chatForm = document.getElementById('chat-form');
 const userInput = document.getElementById('user-input');
@@ -8,7 +12,7 @@ const userInput = document.getElementById('user-input');
 function addMessage(role, text) {
     const messageDiv = document.createElement('div');
     messageDiv.classList.add('message');
-    
+
     if (role === 'user') {
         messageDiv.classList.add('message--user');
         messageDiv.innerHTML = `
@@ -29,7 +33,6 @@ function addMessage(role, text) {
             <div class="message__avatar">Система</div>
             <div class="message__content"><p><em>${text}</em></p></div>
         `;
-        // Сообщения системы будем прокручивать автоматически
     }
 
     chatHistory.appendChild(messageDiv);
@@ -37,33 +40,66 @@ function addMessage(role, text) {
     chatHistory.scrollTop = chatHistory.scrollHeight;
 }
 
-// Функция для имитации ответа Элары (временно)
+// --- ОБНОВЛЕННАЯ ФУНКЦИЯ для получения ответа от бэкенда ---
 async function getElaraResponse(userMessage) {
-    // Здесь позже будет логика вызова API
-    // Пока просто эмулируем задержку и возвращаем заглушку
-    addMessage('system', 'Подключаюсь к серверу Элары...');
-    
-    // Имитация задержки
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Убираем сообщение системы
-    chatHistory.removeChild(chatHistory.lastChild);
+    // Получаем sessionId из localStorage (если есть)
+    const storedSessionId = localStorage.getItem('elaraSessionId');
 
-    // Временный ответ для демонстрации
-    const responses = [
-        "Это интересный вопрос... Позволь мне вспомнить те дни.",
-        "Ты знаешь, в полярной ночи время теряет смысл. Возможно, я немного путаю детали...",
-        "Память играет с нами странные шутки. Но чувства, описанные в книге, — они настоящие.",
-        "Зачем ты спрашиваешь об этом? Тебе не нравится моя история?",
-        "Важно не то, что было, а то, что я почувствовала. Разве нет?",
-        "Иногда истина сложнее, чем кажется на первый взгляд."
-    ];
-    const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-    return randomResponse;
+    // Формируем тело запроса
+    const requestBody = {
+        message: userMessage
+    };
+    // Если есть сохраненный sessionId, добавляем его в запрос
+    if (storedSessionId) {
+        requestBody.sessionId = storedSessionId;
+    }
+
+    try {
+        addMessage('system', 'Элара печатает...'); // Индикатор ожидания
+
+        const response = await fetch(`${BACKEND_URL}/api/chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+        });
+
+        // Убираем индикатор ожидания
+        const systemMessages = chatHistory.querySelectorAll('.message--system');
+        if (systemMessages.length > 0) {
+            chatHistory.removeChild(systemMessages[systemMessages.length - 1]);
+        }
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Сохраняем sessionId в localStorage для будущих запросов
+        if (data.sessionId) {
+            localStorage.setItem('elaraSessionId', data.sessionId);
+        }
+
+        return data.response;
+
+    } catch (error) {
+        console.error("Ошибка при получении ответа от бэкенда:", error);
+        // Убираем индикатор ожидания в случае ошибки
+        const systemMessages = chatHistory.querySelectorAll('.message--system');
+        if (systemMessages.length > 0) {
+            chatHistory.removeChild(systemMessages[systemMessages.length - 1]);
+        }
+        // В случае ошибки API, показываем сообщение пользователю
+        throw new Error(`Не удалось связаться с Эларой: ${error.message}`);
+    }
 }
+// --- КОНЕЦ ОБНОВЛЕННОЙ ФУНКЦИИ ---
 
 // Обработчик отправки формы
-chatForm.addEventListener('submit', async function(e) {
+chatForm.addEventListener('submit', async function (e) {
     e.preventDefault();
 
     const message = userInput.value.trim();
@@ -74,19 +110,23 @@ chatForm.addEventListener('submit', async function(e) {
     // Очищаем поле ввода и блокируем его
     userInput.value = '';
     userInput.disabled = true;
-    chatForm.querySelector('button').disabled = true;
+    const submitButton = chatForm.querySelector('button');
+    const originalButtonText = submitButton.textContent;
+    submitButton.disabled = true;
+    submitButton.textContent = 'Отправка...';
 
     try {
-        // Получаем ответ от Элары
+        // Получаем ответ от Элары через бэкенд
         const response = await getElaraResponse(message);
         addMessage('elara', response);
     } catch (error) {
-        console.error("Ошибка при получении ответа:", error);
-        addMessage('system', 'Произошла ошибка при соединении. Попробуйте позже.');
+        console.error("Ошибка в обработчике формы:", error);
+        addMessage('system', `Ошибка: ${error.message}`);
     } finally {
         // Разблокируем поле ввода
         userInput.disabled = false;
-        chatForm.querySelector('button').disabled = false;
+        submitButton.disabled = false;
+        submitButton.textContent = originalButtonText;
         userInput.focus();
     }
 });
